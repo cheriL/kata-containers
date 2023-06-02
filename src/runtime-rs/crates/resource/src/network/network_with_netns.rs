@@ -26,7 +26,7 @@ use super::{
         Endpoint, IPVlanEndpoint, MacVlanEndpoint, PhysicalEndpoint, VethEndpoint, VlanEndpoint,
     },
     network_entity::NetworkEntity,
-    network_info::network_info_from_link::NetworkInfoFromLink,
+    network_info::network_info_from_link::{NetworkInfoFromLink, handle_addresses},
     utils::{link, netns},
     Network,
 };
@@ -188,13 +188,20 @@ async fn get_entity_from_netns(
         if (attrs.flags & libc::IFF_LOOPBACK as u32) != 0 {
             continue;
         }
+        
+        let ip_addresses = handle_addresses(&handle, attrs).await.context("handle addresses")?;
+        // Ignore unconfigured network interfaces. These are either base tunnel devices that are not namespaced
+        // like gre0, gretap0, sit0, ipip0, tunl0 or incorrectly setup interfaces.
+        if ip_addresses.len() == 0 {
+            continue;
+        }
 
         let idx = idx.fetch_add(1, Ordering::Relaxed);
         let (endpoint, network_info) =
-            create_endpoint(&handle, link.as_ref(), idx, config, d.clone())
+            create_endpoint(&handle, link.as_ref(), idx, config, ip_addresses, d.clone())
                 .await
                 .context("create endpoint")?;
-
+        
         entity_list.push(NetworkEntity::new(endpoint, network_info));
     }
 
@@ -204,6 +211,7 @@ async fn get_entity_from_netns(
 async fn create_endpoint(
     handle: &rtnetlink::Handle,
     link: &dyn link::Link,
+    addrs: Vec<agent::IPAddress>,
     idx: u32,
     config: &NetworkWithNetNsConfig,
     d: Arc<RwLock<DeviceManager>>,
@@ -270,7 +278,7 @@ async fn create_endpoint(
     };
 
     let network_info = Arc::new(
-        NetworkInfoFromLink::new(handle, link, &endpoint.hardware_addr().await)
+        NetworkInfoFromLink::new(handle, link, addrs, &endpoint.hardware_addr().await)
             .await
             .context("network info from link")?,
     );
