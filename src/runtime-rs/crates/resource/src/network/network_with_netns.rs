@@ -194,7 +194,7 @@ async fn get_entity_from_netns(
             .context("handle addresses")?;
         // Ignore unconfigured network interfaces. These are either base tunnel devices that are not namespaced
         // like gre0, gretap0, sit0, ipip0, tunl0 or incorrectly setup interfaces.
-        if ip_addresses.len() == 0 {
+        if ip_addresses.is_empty() {
             continue;
         }
 
